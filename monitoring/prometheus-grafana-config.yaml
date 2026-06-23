@@ -1,0 +1,551 @@
+# ============================================================================
+# Monitoring and Alerting Configuration for Fraud Detection Platform
+# ============================================================================
+# This file contains Prometheus, Grafana, and alerting configurations
+# for comprehensive monitoring of the fraud detection system
+# ============================================================================
+
+---
+# Prometheus Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: fraud-detection
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+      external_labels:
+        cluster: 'fraud-detection-prod'
+        environment: 'production'
+
+    # Alertmanager configuration
+    alerting:
+      alertmanagers:
+        - static_configs:
+            - targets:
+                - alertmanager:9093
+
+    # Load rules
+    rule_files:
+      - '/etc/prometheus/rules/*.yml'
+
+    # Scrape configurations
+    scrape_configs:
+      # Kafka brokers
+      - job_name: 'kafka-brokers'
+        static_configs:
+          - targets:
+              - 'kafka-1:9092'
+              - 'kafka-2:9092'
+              - 'kafka-3:9092'
+        metrics_path: '/metrics'
+        
+      # Kafka Connect
+      - job_name: 'kafka-connect'
+        static_configs:
+          - targets:
+              - 'kafka-connect-1:8083'
+              - 'kafka-connect-2:8083'
+        metrics_path: '/metrics'
+
+      # Schema Registry
+      - job_name: 'schema-registry'
+        static_configs:
+          - targets:
+              - 'schema-registry:8081'
+        metrics_path: '/metrics'
+
+      # ksqlDB
+      - job_name: 'ksqldb'
+        static_configs:
+          - targets:
+              - 'ksqldb-server:8088'
+        metrics_path: '/metrics'
+
+      # Flink JobManager
+      - job_name: 'flink-jobmanager'
+        static_configs:
+          - targets:
+              - 'flink-jobmanager:8081'
+        metrics_path: '/metrics'
+
+      # Flink TaskManagers
+      - job_name: 'flink-taskmanager'
+        static_configs:
+          - targets:
+              - 'flink-taskmanager-1:8081'
+              - 'flink-taskmanager-2:8081'
+              - 'flink-taskmanager-3:8081'
+        metrics_path: '/metrics'
+
+      # Application metrics
+      - job_name: 'fraud-detection-app'
+        static_configs:
+          - targets:
+              - 'fraud-api:8080'
+        metrics_path: '/actuator/prometheus'
+
+      # PostgreSQL
+      - job_name: 'postgresql'
+        static_configs:
+          - targets:
+              - 'postgres-exporter:9187'
+
+      # Elasticsearch
+      - job_name: 'elasticsearch'
+        static_configs:
+          - targets:
+              - 'elasticsearch-exporter:9114'
+
+      # Node exporters
+      - job_name: 'node-exporter'
+        static_configs:
+          - targets:
+              - 'node-exporter-1:9100'
+              - 'node-exporter-2:9100'
+              - 'node-exporter-3:9100'
+
+---
+# Prometheus Alert Rules
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-rules
+  namespace: fraud-detection
+data:
+  fraud-detection-alerts.yml: |
+    groups:
+      - name: fraud_detection_critical
+        interval: 30s
+        rules:
+          # Kafka broker down
+          - alert: KafkaBrokerDown
+            expr: up{job="kafka-brokers"} == 0
+            for: 1m
+            labels:
+              severity: critical
+              component: kafka
+            annotations:
+              summary: "Kafka broker {{ $labels.instance }} is down"
+              description: "Kafka broker has been down for more than 1 minute"
+
+          # High fraud alert rate
+          - alert: HighFraudAlertRate
+            expr: rate(fraud_alerts_total[5m]) > 100
+            for: 5m
+            labels:
+              severity: critical
+              component: fraud-detection
+            annotations:
+              summary: "High fraud alert rate detected"
+              description: "Fraud alert rate is {{ $value }} alerts/sec (threshold: 100)"
+
+          # Critical fraud alerts
+          - alert: CriticalFraudAlertsSpike
+            expr: increase(fraud_alerts_total{severity="CRITICAL"}[5m]) > 50
+            for: 2m
+            labels:
+              severity: critical
+              component: fraud-detection
+            annotations:
+              summary: "Spike in critical fraud alerts"
+              description: "{{ $value }} critical fraud alerts in last 5 minutes"
+
+          # Stream processing lag
+          - alert: HighStreamProcessingLag
+            expr: kafka_consumer_lag > 10000
+            for: 5m
+            labels:
+              severity: critical
+              component: stream-processing
+            annotations:
+              summary: "High consumer lag on {{ $labels.topic }}"
+              description: "Consumer lag is {{ $value }} messages"
+
+          # Connector failures
+          - alert: KafkaConnectorFailed
+            expr: kafka_connect_connector_status{state="FAILED"} > 0
+            for: 1m
+            labels:
+              severity: critical
+              component: kafka-connect
+            annotations:
+              summary: "Kafka connector {{ $labels.connector }} failed"
+              description: "Connector has been in FAILED state for 1 minute"
+
+      - name: fraud_detection_high
+        interval: 1m
+        rules:
+          # High transaction processing latency
+          - alert: HighTransactionLatency
+            expr: histogram_quantile(0.99, rate(transaction_processing_duration_seconds_bucket[5m])) > 0.5
+            for: 5m
+            labels:
+              severity: high
+              component: fraud-detection
+            annotations:
+              summary: "High transaction processing latency"
+              description: "P99 latency is {{ $value }}s (threshold: 0.5s)"
+
+          # ML model inference latency
+          - alert: HighMLInferenceLatency
+            expr: histogram_quantile(0.95, rate(ml_inference_duration_seconds_bucket[5m])) > 0.2
+            for: 5m
+            labels:
+              severity: high
+              component: ml-inference
+            annotations:
+              summary: "High ML inference latency"
+              description: "P95 inference latency is {{ $value }}s"
+
+          # Schema Registry unavailable
+          - alert: SchemaRegistryDown
+            expr: up{job="schema-registry"} == 0
+            for: 2m
+            labels:
+              severity: high
+              component: schema-registry
+            annotations:
+              summary: "Schema Registry is down"
+              description: "Schema Registry unavailable for 2 minutes"
+
+          # High error rate
+          - alert: HighErrorRate
+            expr: rate(fraud_detection_errors_total[5m]) > 10
+            for: 5m
+            labels:
+              severity: high
+              component: fraud-detection
+            annotations:
+              summary: "High error rate in fraud detection"
+              description: "Error rate is {{ $value }} errors/sec"
+
+          # Disk space low
+          - alert: DiskSpaceLow
+            expr: (node_filesystem_avail_bytes / node_filesystem_size_bytes) < 0.1
+            for: 5m
+            labels:
+              severity: high
+              component: infrastructure
+            annotations:
+              summary: "Low disk space on {{ $labels.instance }}"
+              description: "Only {{ $value | humanizePercentage }} disk space available"
+
+      - name: fraud_detection_medium
+        interval: 2m
+        rules:
+          # Elevated false positive rate
+          - alert: ElevatedFalsePositiveRate
+            expr: rate(fraud_false_positives_total[1h]) / rate(fraud_alerts_total[1h]) > 0.3
+            for: 10m
+            labels:
+              severity: medium
+              component: fraud-detection
+            annotations:
+              summary: "Elevated false positive rate"
+              description: "False positive rate is {{ $value | humanizePercentage }}"
+
+          # Memory usage high
+          - alert: HighMemoryUsage
+            expr: (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes > 0.85
+            for: 10m
+            labels:
+              severity: medium
+              component: infrastructure
+            annotations:
+              summary: "High memory usage on {{ $labels.instance }}"
+              description: "Memory usage is {{ $value | humanizePercentage }}"
+
+          # CPU usage high
+          - alert: HighCPUUsage
+            expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+            for: 10m
+            labels:
+              severity: medium
+              component: infrastructure
+            annotations:
+              summary: "High CPU usage on {{ $labels.instance }}"
+              description: "CPU usage is {{ $value }}%"
+
+---
+# Grafana Dashboard Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards
+  namespace: fraud-detection
+data:
+  fraud-detection-overview.json: |
+    {
+      "dashboard": {
+        "title": "Fraud Detection Platform - Overview",
+        "tags": ["fraud-detection", "overview"],
+        "timezone": "browser",
+        "panels": [
+          {
+            "id": 1,
+            "title": "Transaction Processing Rate",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "rate(transactions_processed_total[5m])",
+                "legendFormat": "Transactions/sec"
+              }
+            ]
+          },
+          {
+            "id": 2,
+            "title": "Fraud Alert Rate by Severity",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "rate(fraud_alerts_total{severity=\"CRITICAL\"}[5m])",
+                "legendFormat": "Critical"
+              },
+              {
+                "expr": "rate(fraud_alerts_total{severity=\"HIGH\"}[5m])",
+                "legendFormat": "High"
+              },
+              {
+                "expr": "rate(fraud_alerts_total{severity=\"MEDIUM\"}[5m])",
+                "legendFormat": "Medium"
+              }
+            ]
+          },
+          {
+            "id": 3,
+            "title": "Processing Latency (P99)",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "histogram_quantile(0.99, rate(transaction_processing_duration_seconds_bucket[5m]))",
+                "legendFormat": "P99 Latency"
+              }
+            ]
+          },
+          {
+            "id": 4,
+            "title": "Fraud Detection Decisions",
+            "type": "piechart",
+            "targets": [
+              {
+                "expr": "sum by(decision) (fraud_decisions_total)",
+                "legendFormat": "{{ decision }}"
+              }
+            ]
+          },
+          {
+            "id": 5,
+            "title": "Consumer Lag",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "kafka_consumer_lag",
+                "legendFormat": "{{ topic }} - {{ consumer_group }}"
+              }
+            ]
+          },
+          {
+            "id": 6,
+            "title": "ML Model Performance",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "ml_model_accuracy",
+                "legendFormat": "Accuracy"
+              },
+              {
+                "expr": "ml_model_precision",
+                "legendFormat": "Precision"
+              },
+              {
+                "expr": "ml_model_recall",
+                "legendFormat": "Recall"
+              }
+            ]
+          }
+        ]
+      }
+    }
+
+---
+# Alertmanager Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alertmanager-config
+  namespace: fraud-detection
+data:
+  alertmanager.yml: |
+    global:
+      resolve_timeout: 5m
+      slack_api_url: 'https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK'
+      pagerduty_url: 'https://events.pagerduty.com/v2/enqueue'
+
+    route:
+      group_by: ['alertname', 'cluster', 'service']
+      group_wait: 10s
+      group_interval: 10s
+      repeat_interval: 12h
+      receiver: 'default'
+      routes:
+        # Critical alerts go to PagerDuty and Slack
+        - match:
+            severity: critical
+          receiver: 'critical-alerts'
+          continue: true
+        
+        # High severity to Slack
+        - match:
+            severity: high
+          receiver: 'high-alerts'
+        
+        # Medium severity to Slack (throttled)
+        - match:
+            severity: medium
+          receiver: 'medium-alerts'
+
+    receivers:
+      - name: 'default'
+        slack_configs:
+          - channel: '#fraud-detection-alerts'
+            title: 'Alert: {{ .GroupLabels.alertname }}'
+            text: '{{ range .Alerts }}{{ .Annotations.description }}{{ end }}'
+
+      - name: 'critical-alerts'
+        pagerduty_configs:
+          - service_key: 'YOUR_PAGERDUTY_SERVICE_KEY'
+            description: '{{ .GroupLabels.alertname }}: {{ .CommonAnnotations.summary }}'
+        slack_configs:
+          - channel: '#fraud-detection-critical'
+            title: '🚨 CRITICAL: {{ .GroupLabels.alertname }}'
+            text: '{{ range .Alerts }}{{ .Annotations.description }}{{ end }}'
+            color: 'danger'
+
+      - name: 'high-alerts'
+        slack_configs:
+          - channel: '#fraud-detection-alerts'
+            title: '⚠️ HIGH: {{ .GroupLabels.alertname }}'
+            text: '{{ range .Alerts }}{{ .Annotations.description }}{{ end }}'
+            color: 'warning'
+
+      - name: 'medium-alerts'
+        slack_configs:
+          - channel: '#fraud-detection-alerts'
+            title: 'ℹ️ MEDIUM: {{ .GroupLabels.alertname }}'
+            text: '{{ range .Alerts }}{{ .Annotations.description }}{{ end }}'
+            color: 'good'
+
+    inhibit_rules:
+      # Inhibit medium alerts if critical alert is firing
+      - source_match:
+          severity: 'critical'
+        target_match:
+          severity: 'medium'
+        equal: ['alertname', 'cluster', 'service']
+
+---
+# Custom Metrics Exporter Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: custom-metrics-config
+  namespace: fraud-detection
+data:
+  metrics.yaml: |
+    # Business Metrics
+    business_metrics:
+      - name: fraud_alerts_total
+        type: counter
+        help: "Total number of fraud alerts generated"
+        labels: ["severity", "alert_type"]
+
+      - name: fraud_decisions_total
+        type: counter
+        help: "Total fraud detection decisions"
+        labels: ["decision"]
+
+      - name: fraud_false_positives_total
+        type: counter
+        help: "Total false positive fraud alerts"
+
+      - name: fraud_true_positives_total
+        type: counter
+        help: "Total true positive fraud detections"
+
+      - name: fraud_amount_blocked
+        type: counter
+        help: "Total transaction amount blocked (USD)"
+
+      - name: fraud_amount_saved
+        type: counter
+        help: "Estimated fraud amount prevented (USD)"
+
+    # Technical Metrics
+    technical_metrics:
+      - name: transaction_processing_duration_seconds
+        type: histogram
+        help: "Transaction processing duration"
+        buckets: [0.01, 0.05, 0.1, 0.5, 1.0, 5.0]
+
+      - name: ml_inference_duration_seconds
+        type: histogram
+        help: "ML model inference duration"
+        buckets: [0.001, 0.01, 0.05, 0.1, 0.5]
+
+      - name: kafka_consumer_lag
+        type: gauge
+        help: "Kafka consumer lag"
+        labels: ["topic", "consumer_group"]
+
+      - name: stream_processing_throughput
+        type: gauge
+        help: "Stream processing throughput (records/sec)"
+        labels: ["processor"]
+
+      - name: fraud_detection_errors_total
+        type: counter
+        help: "Total errors in fraud detection pipeline"
+        labels: ["error_type", "component"]
+
+    # ML Model Metrics
+    ml_metrics:
+      - name: ml_model_accuracy
+        type: gauge
+        help: "ML model accuracy"
+        labels: ["model_name", "model_version"]
+
+      - name: ml_model_precision
+        type: gauge
+        help: "ML model precision"
+        labels: ["model_name", "model_version"]
+
+      - name: ml_model_recall
+        type: gauge
+        help: "ML model recall"
+        labels: ["model_name", "model_version"]
+
+      - name: ml_model_f1_score
+        type: gauge
+        help: "ML model F1 score"
+        labels: ["model_name", "model_version"]
+
+---
+# Deployment Notes
+# ============================================================================
+# 1. Deploy Prometheus, Grafana, and Alertmanager using Helm or kubectl
+# 2. Configure service discovery for dynamic target discovery
+# 3. Set up persistent volumes for Prometheus data retention
+# 4. Configure Grafana data sources to point to Prometheus
+# 5. Import Grafana dashboards from ConfigMaps
+# 6. Update Slack and PagerDuty credentials in secrets
+# 7. Set up log aggregation with ELK or Loki
+# 8. Configure distributed tracing with Jaeger or Zipkin
+# 9. Implement custom metrics exporters for business KPIs
+# 10. Set up automated runbooks for common alerts
+# ============================================================================
+
+# Made with Bob

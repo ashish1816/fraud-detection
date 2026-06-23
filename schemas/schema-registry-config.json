@@ -1,0 +1,614 @@
+{
+  "schema_registry_configuration": {
+    "compatibility_level": "BACKWARD",
+    "mode": "READWRITE",
+    "normalize_schemas": true,
+    "metadata": {
+      "description": "Schema Registry configuration for fraud detection platform",
+      "owner": "fraud-detection-team",
+      "version": "1.0.0"
+    }
+  },
+  "schemas": [
+    {
+      "subject": "postgres-transactions-value",
+      "schema_type": "AVRO",
+      "schema": {
+        "type": "record",
+        "name": "Transaction",
+        "namespace": "com.frauddetection.transactions",
+        "doc": "Transaction event from payment processing system",
+        "fields": [
+          {
+            "name": "transaction_id",
+            "type": "long",
+            "doc": "Unique transaction identifier"
+          },
+          {
+            "name": "user_id",
+            "type": "long",
+            "doc": "User identifier"
+          },
+          {
+            "name": "merchant_id",
+            "type": "long",
+            "doc": "Merchant identifier"
+          },
+          {
+            "name": "amount",
+            "type": {
+              "type": "bytes",
+              "logicalType": "decimal",
+              "precision": 15,
+              "scale": 2
+            },
+            "doc": "Transaction amount"
+          },
+          {
+            "name": "currency",
+            "type": "string",
+            "doc": "ISO 4217 currency code"
+          },
+          {
+            "name": "payment_method",
+            "type": {
+              "type": "enum",
+              "name": "PaymentMethod",
+              "symbols": ["CREDIT_CARD", "DEBIT_CARD", "BANK_TRANSFER", "DIGITAL_WALLET", "CRYPTO"]
+            },
+            "doc": "Payment method used"
+          },
+          {
+            "name": "card_last_four",
+            "type": ["null", "string"],
+            "default": null,
+            "doc": "Last 4 digits of card (PCI compliant)"
+          },
+          {
+            "name": "transaction_type",
+            "type": {
+              "type": "enum",
+              "name": "TransactionType",
+              "symbols": ["PURCHASE", "REFUND", "WITHDRAWAL", "DEPOSIT", "TRANSFER"]
+            },
+            "doc": "Type of transaction"
+          },
+          {
+            "name": "status",
+            "type": {
+              "type": "enum",
+              "name": "TransactionStatus",
+              "symbols": ["PENDING", "APPROVED", "DECLINED", "BLOCKED", "UNDER_REVIEW"]
+            },
+            "doc": "Current transaction status"
+          },
+          {
+            "name": "ip_address",
+            "type": "string",
+            "doc": "Client IP address"
+          },
+          {
+            "name": "device_id",
+            "type": ["null", "string"],
+            "default": null,
+            "doc": "Device fingerprint identifier"
+          },
+          {
+            "name": "user_agent",
+            "type": ["null", "string"],
+            "default": null,
+            "doc": "HTTP User-Agent string"
+          },
+          {
+            "name": "latitude",
+            "type": ["null", "double"],
+            "default": null,
+            "doc": "Transaction latitude"
+          },
+          {
+            "name": "longitude",
+            "type": ["null", "double"],
+            "default": null,
+            "doc": "Transaction longitude"
+          },
+          {
+            "name": "created_at",
+            "type": "long",
+            "logicalType": "timestamp-millis",
+            "doc": "Transaction timestamp in milliseconds"
+          }
+        ]
+      },
+      "compatibility": "BACKWARD",
+      "metadata": {
+        "pii_fields": ["card_last_four", "ip_address"],
+        "retention_days": 2555,
+        "data_classification": "CONFIDENTIAL"
+      }
+    },
+    {
+      "subject": "mongo-user_profiles-value",
+      "schema_type": "AVRO",
+      "schema": {
+        "type": "record",
+        "name": "UserProfile",
+        "namespace": "com.frauddetection.users",
+        "doc": "User profile information",
+        "fields": [
+          {
+            "name": "user_id",
+            "type": "long",
+            "doc": "Unique user identifier"
+          },
+          {
+            "name": "email",
+            "type": ["null", "string"],
+            "default": null,
+            "doc": "User email address (hashed)"
+          },
+          {
+            "name": "phone",
+            "type": ["null", "string"],
+            "default": null,
+            "doc": "User phone number (hashed)"
+          },
+          {
+            "name": "account_age_days",
+            "type": "int",
+            "doc": "Days since account creation"
+          },
+          {
+            "name": "kyc_verified",
+            "type": "boolean",
+            "default": false,
+            "doc": "KYC verification status"
+          },
+          {
+            "name": "risk_score",
+            "type": "int",
+            "doc": "User risk score (0-100)"
+          },
+          {
+            "name": "country",
+            "type": "string",
+            "doc": "ISO 3166-1 alpha-2 country code"
+          },
+          {
+            "name": "preferred_currency",
+            "type": "string",
+            "doc": "User's preferred currency"
+          },
+          {
+            "name": "total_transactions",
+            "type": "int",
+            "doc": "Lifetime transaction count"
+          },
+          {
+            "name": "total_amount_lifetime",
+            "type": {
+              "type": "bytes",
+              "logicalType": "decimal",
+              "precision": 15,
+              "scale": 2
+            },
+            "doc": "Lifetime transaction amount"
+          },
+          {
+            "name": "last_login_at",
+            "type": ["null", "long"],
+            "default": null,
+            "logicalType": "timestamp-millis",
+            "doc": "Last login timestamp"
+          },
+          {
+            "name": "updated_at",
+            "type": "long",
+            "logicalType": "timestamp-millis",
+            "doc": "Profile update timestamp"
+          }
+        ]
+      },
+      "compatibility": "BACKWARD",
+      "metadata": {
+        "pii_fields": ["email", "phone"],
+        "retention_days": 2555,
+        "data_classification": "CONFIDENTIAL"
+      }
+    },
+    {
+      "subject": "fraud-alerts-comprehensive-value",
+      "schema_type": "AVRO",
+      "schema": {
+        "type": "record",
+        "name": "FraudAlert",
+        "namespace": "com.frauddetection.alerts",
+        "doc": "Comprehensive fraud alert",
+        "fields": [
+          {
+            "name": "alert_id",
+            "type": "string",
+            "doc": "Unique alert identifier"
+          },
+          {
+            "name": "transaction_id",
+            "type": "long",
+            "doc": "Associated transaction ID"
+          },
+          {
+            "name": "user_id",
+            "type": "long",
+            "doc": "User identifier"
+          },
+          {
+            "name": "alert_type",
+            "type": {
+              "type": "enum",
+              "name": "AlertType",
+              "symbols": [
+                "HIGH_RISK_PATTERN",
+                "AMOUNT_ANOMALY",
+                "IMPOSSIBLE_TRAVEL",
+                "THREAT_INTEL_MATCH",
+                "ML_HIGH_RISK",
+                "VELOCITY_VIOLATION",
+                "FRAUD_RING",
+                "ACCOUNT_TAKEOVER",
+                "BEHAVIORAL_ANOMALY"
+              ]
+            },
+            "doc": "Type of fraud alert"
+          },
+          {
+            "name": "severity",
+            "type": {
+              "type": "enum",
+              "name": "Severity",
+              "symbols": ["LOW", "MEDIUM", "HIGH", "CRITICAL"]
+            },
+            "doc": "Alert severity level"
+          },
+          {
+            "name": "fraud_score",
+            "type": "double",
+            "doc": "Calculated fraud score (0-100)"
+          },
+          {
+            "name": "ml_probability",
+            "type": ["null", "double"],
+            "default": null,
+            "doc": "ML model fraud probability (0-1)"
+          },
+          {
+            "name": "risk_factors",
+            "type": {
+              "type": "array",
+              "items": "string"
+            },
+            "doc": "List of contributing risk factors"
+          },
+          {
+            "name": "alert_timestamp",
+            "type": "long",
+            "logicalType": "timestamp-millis",
+            "doc": "Alert generation timestamp"
+          },
+          {
+            "name": "metadata",
+            "type": [
+              "null",
+              {
+                "type": "map",
+                "values": "string"
+              }
+            ],
+            "default": null,
+            "doc": "Additional alert metadata"
+          }
+        ]
+      },
+      "compatibility": "BACKWARD",
+      "metadata": {
+        "retention_days": 2555,
+        "data_classification": "CONFIDENTIAL"
+      }
+    },
+    {
+      "subject": "fraud-scores-value",
+      "schema_type": "AVRO",
+      "schema": {
+        "type": "record",
+        "name": "FraudScore",
+        "namespace": "com.frauddetection.scores",
+        "doc": "Real-time fraud scoring result",
+        "fields": [
+          {
+            "name": "transaction_id",
+            "type": "long",
+            "doc": "Transaction identifier"
+          },
+          {
+            "name": "user_id",
+            "type": "long",
+            "doc": "User identifier"
+          },
+          {
+            "name": "amount",
+            "type": {
+              "type": "bytes",
+              "logicalType": "decimal",
+              "precision": 15,
+              "scale": 2
+            },
+            "doc": "Transaction amount"
+          },
+          {
+            "name": "merchant_id",
+            "type": "long",
+            "doc": "Merchant identifier"
+          },
+          {
+            "name": "amount_score",
+            "type": "int",
+            "doc": "Score component for amount"
+          },
+          {
+            "name": "kyc_score",
+            "type": "int",
+            "doc": "Score component for KYC status"
+          },
+          {
+            "name": "account_age_score",
+            "type": "int",
+            "doc": "Score component for account age"
+          },
+          {
+            "name": "device_score",
+            "type": "int",
+            "doc": "Score component for device risk"
+          },
+          {
+            "name": "velocity_score",
+            "type": "int",
+            "doc": "Score component for velocity"
+          },
+          {
+            "name": "user_risk_score_normalized",
+            "type": "double",
+            "doc": "Normalized user risk score"
+          },
+          {
+            "name": "fraud_score",
+            "type": "double",
+            "doc": "Total fraud score (0-100)"
+          },
+          {
+            "name": "decision",
+            "type": {
+              "type": "enum",
+              "name": "Decision",
+              "symbols": ["APPROVE", "CHALLENGE", "REVIEW", "BLOCK"]
+            },
+            "doc": "Fraud detection decision"
+          },
+          {
+            "name": "created_at",
+            "type": "long",
+            "logicalType": "timestamp-millis",
+            "doc": "Score calculation timestamp"
+          }
+        ]
+      },
+      "compatibility": "BACKWARD",
+      "metadata": {
+        "retention_days": 365,
+        "data_classification": "CONFIDENTIAL"
+      }
+    },
+    {
+      "subject": "ml-predictions-value",
+      "schema_type": "AVRO",
+      "schema": {
+        "type": "record",
+        "name": "MLPrediction",
+        "namespace": "com.frauddetection.ml",
+        "doc": "Machine learning model prediction",
+        "fields": [
+          {
+            "name": "transaction_id",
+            "type": "long",
+            "doc": "Transaction identifier"
+          },
+          {
+            "name": "model_name",
+            "type": "string",
+            "doc": "ML model name"
+          },
+          {
+            "name": "fraud_probability",
+            "type": "double",
+            "doc": "Predicted fraud probability (0-1)"
+          },
+          {
+            "name": "prediction_class",
+            "type": {
+              "type": "enum",
+              "name": "PredictionClass",
+              "symbols": ["LEGITIMATE", "SUSPICIOUS", "FRAUDULENT"]
+            },
+            "doc": "Predicted class"
+          },
+          {
+            "name": "feature_importance",
+            "type": {
+              "type": "map",
+              "values": "double"
+            },
+            "doc": "Feature importance scores for explainability"
+          },
+          {
+            "name": "model_version",
+            "type": "string",
+            "doc": "Model version identifier"
+          },
+          {
+            "name": "prediction_timestamp",
+            "type": "long",
+            "logicalType": "timestamp-millis",
+            "doc": "Prediction timestamp"
+          },
+          {
+            "name": "inference_latency_ms",
+            "type": ["null", "int"],
+            "default": null,
+            "doc": "Model inference latency in milliseconds"
+          }
+        ]
+      },
+      "compatibility": "BACKWARD",
+      "metadata": {
+        "retention_days": 365,
+        "data_classification": "CONFIDENTIAL"
+      }
+    }
+  ],
+  "governance_policies": {
+    "data_quality_rules": [
+      {
+        "rule_name": "transaction_amount_validation",
+        "description": "Ensure transaction amounts are positive and within limits",
+        "subjects": ["postgres-transactions-value"],
+        "validation": "amount > 0 AND amount < 1000000"
+      },
+      {
+        "rule_name": "required_fields_check",
+        "description": "Ensure critical fields are not null",
+        "subjects": ["postgres-transactions-value", "mongo-user_profiles-value"],
+        "validation": "user_id IS NOT NULL AND created_at IS NOT NULL"
+      },
+      {
+        "rule_name": "fraud_score_range",
+        "description": "Fraud scores must be between 0 and 100",
+        "subjects": ["fraud-scores-value"],
+        "validation": "fraud_score >= 0 AND fraud_score <= 100"
+      }
+    ],
+    "data_lineage": {
+      "enabled": true,
+      "track_transformations": true,
+      "retention_days": 365
+    },
+    "pii_protection": {
+      "enabled": true,
+      "masking_rules": [
+        {
+          "field_pattern": "email",
+          "masking_type": "HASH_SHA256"
+        },
+        {
+          "field_pattern": "phone",
+          "masking_type": "HASH_SHA256"
+        },
+        {
+          "field_pattern": "card_last_four",
+          "masking_type": "PARTIAL_MASK",
+          "visible_chars": 4
+        },
+        {
+          "field_pattern": "ip_address",
+          "masking_type": "ANONYMIZE"
+        }
+      ]
+    },
+    "access_control": {
+      "enabled": true,
+      "rbac_policies": [
+        {
+          "role": "fraud_analyst",
+          "permissions": ["READ"],
+          "subjects": ["fraud-alerts-comprehensive-value", "fraud-scores-value"]
+        },
+        {
+          "role": "data_scientist",
+          "permissions": ["READ"],
+          "subjects": ["ml-predictions-value", "postgres-transactions-value"]
+        },
+        {
+          "role": "compliance_officer",
+          "permissions": ["READ", "AUDIT"],
+          "subjects": ["*"]
+        },
+        {
+          "role": "system_admin",
+          "permissions": ["READ", "WRITE", "DELETE"],
+          "subjects": ["*"]
+        }
+      ]
+    },
+    "retention_policies": [
+      {
+        "subject_pattern": "*-transactions-*",
+        "retention_days": 2555,
+        "action": "ARCHIVE_TO_S3"
+      },
+      {
+        "subject_pattern": "*-alerts-*",
+        "retention_days": 2555,
+        "action": "ARCHIVE_TO_S3"
+      },
+      {
+        "subject_pattern": "*-predictions-*",
+        "retention_days": 365,
+        "action": "DELETE"
+      }
+    ],
+    "compliance": {
+      "gdpr": {
+        "enabled": true,
+        "right_to_be_forgotten": true,
+        "data_portability": true,
+        "consent_tracking": true
+      },
+      "pci_dss": {
+        "enabled": true,
+        "card_data_encryption": true,
+        "access_logging": true,
+        "quarterly_audits": true
+      },
+      "soc2": {
+        "enabled": true,
+        "audit_trails": true,
+        "change_management": true,
+        "incident_response": true
+      }
+    }
+  },
+  "schema_evolution_strategy": {
+    "default_compatibility": "BACKWARD",
+    "allow_breaking_changes": false,
+    "require_approval": true,
+    "approval_workflow": {
+      "reviewers": ["data-governance-team", "fraud-detection-team"],
+      "min_approvals": 2
+    },
+    "testing_requirements": {
+      "unit_tests": true,
+      "integration_tests": true,
+      "backward_compatibility_tests": true
+    }
+  },
+  "monitoring_and_alerting": {
+    "schema_registry_health": {
+      "check_interval_seconds": 60,
+      "alert_on_failure": true
+    },
+    "schema_compatibility_violations": {
+      "alert_severity": "HIGH",
+      "notification_channels": ["slack", "pagerduty"]
+    },
+    "schema_usage_metrics": {
+      "track_producer_count": true,
+      "track_consumer_count": true,
+      "track_schema_versions": true
+    }
+  }
+}

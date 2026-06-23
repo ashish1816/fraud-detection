@@ -1,0 +1,55 @@
+# Exclude documentation files (keep private)
+MANAGEMENT_PRESENTATION.md
+QUICK_START_GUIDE.md
+BUSINESS_VALUE.md
+CREDIT_CARD_WORKAROUND.md
+HACKATHON_QUICKSTART.md
+README_SETUP.md
+DEPLOYMENT_GUIDE.md
+
+# Exclude sensitive configuration
+scripts/config.env
+scripts/config.env.backup
+scripts/client.properties
+*.env
+*.properties
+
+# Exclude logs
+logs/
+*.log
+
+# Keep schema files but exclude generated data
+# data/ folder contains schema definitions - keep it!
+*.json.backup
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Temporary files
+*.tmp
+*.bak
+*.backup
+temp/
+tmp/
+
+# Made with Bob

@@ -1,0 +1,355 @@
+{
+  "connectors": [
+    {
+      "name": "elasticsearch-fraud-alerts-sink",
+      "config": {
+        "connector.class": "io.confluent.connect.elasticsearch.ElasticsearchSinkConnector",
+        "connection.url": "https://elasticsearch:9200",
+        "connection.username": "${file:/secrets/elastic-credentials.properties:username}",
+        "connection.password": "${file:/secrets/elastic-credentials.properties:password}",
+        "type.name": "_doc",
+        "topics": "fraud-alerts,fraud-scores,fraud-alerts-comprehensive",
+        "key.ignore": false,
+        "schema.ignore": false,
+        "behavior.on.null.values": "delete",
+        "behavior.on.malformed.documents": "warn",
+        "drop.invalid.message": false,
+        "batch.size": 2000,
+        "max.buffered.records": 20000,
+        "linger.ms": 1000,
+        "flush.timeout.ms": 10000,
+        "max.in.flight.requests": 5,
+        "retry.backoff.ms": 100,
+        "max.retries": 10,
+        "connection.compression": true,
+        "write.method": "upsert",
+        "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+        "value.converter": "io.confluent.connect.avro.AvroConverter",
+        "value.converter.schema.registry.url": "http://schema-registry:8081",
+        "transforms": "addTimestamp,routeToIndex",
+        "transforms.addTimestamp.type": "org.apache.kafka.connect.transforms.InsertField$Value",
+        "transforms.addTimestamp.timestamp.field": "indexed_at",
+        "transforms.routeToIndex.type": "org.apache.kafka.connect.transforms.RegexRouter",
+        "transforms.routeToIndex.regex": "fraud-(.*)",
+        "transforms.routeToIndex.replacement": "fraud-detection-$1-${timestamp}",
+        "tasks.max": 3
+      }
+    },
+    {
+      "name": "postgresql-case-management-sink",
+      "config": {
+        "connector.class": "io.confluent.connect.jdbc.JdbcSinkConnector",
+        "connection.url": "jdbc:postgresql://postgres-db:5432/fraud_cases",
+        "connection.user": "${file:/secrets/db-credentials.properties:postgres.user}",
+        "connection.password": "${file:/secrets/db-credentials.properties:postgres.password}",
+        "topics": "fraud-alerts-comprehensive",
+        "table.name.format": "fraud_cases",
+        "insert.mode": "upsert",
+        "pk.mode": "record_value",
+        "pk.fields": "alert_id",
+        "auto.create": false,
+        "auto.evolve": true,
+        "batch.size": 1000,
+        "max.retries": 10,
+        "retry.backoff.ms": 3000,
+        "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+        "value.converter": "io.confluent.connect.avro.AvroConverter",
+        "value.converter.schema.registry.url": "http://schema-registry:8081",
+        "transforms": "flatten,addMetadata",
+        "transforms.flatten.type": "org.apache.kafka.connect.transforms.Flatten$Value",
+        "transforms.flatten.delimiter": "_",
+        "transforms.addMetadata.type": "org.apache.kafka.connect.transforms.InsertField$Value",
+        "transforms.addMetadata.timestamp.field": "created_at",
+        "transforms.addMetadata.static.field": "source",
+        "transforms.addMetadata.static.value": "kafka-stream-processing",
+        "tasks.max": 2
+      }
+    },
+    {
+      "name": "snowflake-data-warehouse-sink",
+      "config": {
+        "connector.class": "com.snowflake.kafka.connector.SnowflakeSinkConnector",
+        "topics": "transactions-enriched,fraud-scores,user-profiles,fraud-detection-metrics",
+        "snowflake.url.name": "https://your-account.snowflakecomputing.com",
+        "snowflake.user.name": "${file:/secrets/snowflake-credentials.properties:username}",
+        "snowflake.private.key": "${file:/secrets/snowflake-credentials.properties:private_key}",
+        "snowflake.database.name": "FRAUD_DETECTION",
+        "snowflake.schema.name": "ANALYTICS",
+        "snowflake.role.name": "KAFKA_CONNECTOR_ROLE",
+        "buffer.count.records": 10000,
+        "buffer.flush.time": 60,
+        "buffer.size.bytes": 5000000,
+        "snowflake.topic2table.map": "transactions-enriched:TRANSACTIONS,fraud-scores:FRAUD_SCORES,user-profiles:USER_PROFILES,fraud-detection-metrics:METRICS",
+        "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+        "value.converter": "com.snowflake.kafka.connector.records.SnowflakeAvroConverter",
+        "value.converter.schema.registry.url": "http://schema-registry:8081",
+        "value.converter.basic.auth.credentials.source": "USER_INFO",
+        "tasks.max": 4
+      }
+    },
+    {
+      "name": "s3-data-lake-sink",
+      "config": {
+        "connector.class": "io.confluent.connect.s3.S3SinkConnector",
+        "s3.region": "us-east-1",
+        "s3.bucket.name": "fraud-detection-data-lake",
+        "s3.part.size": 5242880,
+        "s3.credentials.provider.class": "com.amazonaws.auth.DefaultAWSCredentialsProviderChain",
+        "flush.size": 10000,
+        "rotate.interval.ms": 300000,
+        "rotate.schedule.interval.ms": 3600000,
+        "topics": "transactions-enriched,fraud-alerts-comprehensive,ml-predictions",
+        "topics.dir": "fraud-detection",
+        "storage.class": "io.confluent.connect.s3.storage.S3Storage",
+        "format.class": "io.confluent.connect.s3.format.parquet.ParquetFormat",
+        "parquet.codec": "snappy",
+        "schema.compatibility": "NONE",
+        "partitioner.class": "io.confluent.connect.storage.partitioner.TimeBasedPartitioner",
+        "path.format": "'year'=YYYY/'month'=MM/'day'=dd/'hour'=HH",
+        "partition.duration.ms": 3600000,
+        "timestamp.extractor": "Record",
+        "locale": "en-US",
+        "timezone": "UTC",
+        "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+        "value.converter": "io.confluent.connect.avro.AvroConverter",
+        "value.converter.schema.registry.url": "http://schema-registry:8081",
+        "tasks.max": 4
+      }
+    },
+    {
+      "name": "slack-critical-alerts-sink",
+      "config": {
+        "connector.class": "io.confluent.connect.http.HttpSinkConnector",
+        "topics": "fraud-alerts-comprehensive",
+        "http.api.url": "https://hooks.slack.com/services/${file:/secrets/slack-credentials.properties:webhook_path}",
+        "request.method": "POST",
+        "headers": "Content-Type:application/json",
+        "batch.max.size": 1,
+        "max.retries": 3,
+        "retry.backoff.ms": 3000,
+        "request.body.format": "json",
+        "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+        "value.converter.schemas.enable": false,
+        "transforms": "filter,formatMessage",
+        "transforms.filter.type": "org.apache.kafka.connect.transforms.Filter",
+        "transforms.filter.predicate": "isCritical",
+        "predicates": "isCritical",
+        "predicates.isCritical.type": "org.apache.kafka.connect.transforms.predicates.TopicNameMatches",
+        "predicates.isCritical.pattern": ".*",
+        "transforms.formatMessage.type": "org.apache.kafka.connect.transforms.InsertField$Value",
+        "transforms.formatMessage.static.field": "text",
+        "transforms.formatMessage.static.value": "🚨 CRITICAL FRAUD ALERT",
+        "tasks.max": 1
+      }
+    },
+    {
+      "name": "pagerduty-incident-sink",
+      "config": {
+        "connector.class": "io.confluent.connect.http.HttpSinkConnector",
+        "topics": "fraud-alerts-comprehensive",
+        "http.api.url": "https://events.pagerduty.com/v2/enqueue",
+        "request.method": "POST",
+        "headers": "Content-Type:application/json",
+        "batch.max.size": 1,
+        "max.retries": 5,
+        "retry.backoff.ms": 5000,
+        "request.body.format": "json",
+        "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+        "value.converter.schemas.enable": false,
+        "transforms": "filter,formatPagerDuty",
+        "transforms.filter.type": "org.apache.kafka.connect.transforms.Filter",
+        "transforms.filter.predicate": "isCriticalOrHigh",
+        "predicates": "isCriticalOrHigh",
+        "predicates.isCriticalOrHigh.type": "org.apache.kafka.connect.transforms.predicates.RecordIsTombstone",
+        "transforms.formatPagerDuty.type": "org.apache.kafka.connect.transforms.InsertField$Value",
+        "transforms.formatPagerDuty.static.field": "routing_key",
+        "transforms.formatPagerDuty.static.value": "${file:/secrets/pagerduty-credentials.properties:routing_key}",
+        "tasks.max": 1
+      }
+    },
+    {
+      "name": "salesforce-crm-update-sink",
+      "config": {
+        "connector.class": "io.confluent.salesforce.SalesforceSinkConnector",
+        "topics": "fraud-alerts-comprehensive",
+        "salesforce.instance": "https://your-instance.salesforce.com",
+        "salesforce.username": "${file:/secrets/salesforce-credentials.properties:username}",
+        "salesforce.password": "${file:/secrets/salesforce-credentials.properties:password}",
+        "salesforce.password.token": "${file:/secrets/salesforce-credentials.properties:token}",
+        "salesforce.object": "Case",
+        "salesforce.operation": "upsert",
+        "salesforce.external.id.field": "Alert_ID__c",
+        "salesforce.ignore.fields": "Id",
+        "salesforce.ignore.reference.fields": true,
+        "max.retries": 10,
+        "retry.backoff.ms": 3000,
+        "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+        "value.converter": "io.confluent.connect.avro.AvroConverter",
+        "value.converter.schema.registry.url": "http://schema-registry:8081",
+        "transforms": "mapFields",
+        "transforms.mapFields.type": "org.apache.kafka.connect.transforms.ReplaceField$Value",
+        "transforms.mapFields.renames": "alert_id:Alert_ID__c,user_id:User_ID__c,severity:Priority,alert_type:Type",
+        "tasks.max": 2
+      }
+    },
+    {
+      "name": "mongodb-audit-log-sink",
+      "config": {
+        "connector.class": "com.mongodb.kafka.connect.MongoSinkConnector",
+        "connection.uri": "mongodb://${file:/secrets/db-credentials.properties:mongo.user}:${file:/secrets/db-credentials.properties:mongo.password}@mongodb:27017",
+        "database": "fraud_detection",
+        "collection": "audit_logs",
+        "topics": "fraud-alerts-comprehensive,fraud-scores",
+        "max.num.retries": 3,
+        "retries.defer.timeout": 5000,
+        "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+        "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+        "value.converter.schemas.enable": false,
+        "document.id.strategy": "com.mongodb.kafka.connect.sink.processor.id.strategy.ProvidedInValueStrategy",
+        "document.id.strategy.overwrite.existing": true,
+        "writemodel.strategy": "com.mongodb.kafka.connect.sink.writemodel.strategy.ReplaceOneBusinessKeyStrategy",
+        "post.processor.chain": "com.mongodb.kafka.connect.sink.processor.DocumentIdAdder",
+        "tasks.max": 2
+      }
+    },
+    {
+      "name": "tableau-dashboard-sink",
+      "config": {
+        "connector.class": "io.confluent.connect.jdbc.JdbcSinkConnector",
+        "connection.url": "jdbc:postgresql://tableau-db:5432/analytics",
+        "connection.user": "${file:/secrets/db-credentials.properties:tableau.user}",
+        "connection.password": "${file:/secrets/db-credentials.properties:tableau.password}",
+        "topics": "fraud-detection-metrics,processing-metrics",
+        "table.name.format": "${topic}",
+        "insert.mode": "insert",
+        "auto.create": true,
+        "auto.evolve": true,
+        "batch.size": 3000,
+        "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+        "value.converter": "io.confluent.connect.avro.AvroConverter",
+        "value.converter.schema.registry.url": "http://schema-registry:8081",
+        "tasks.max": 2
+      }
+    },
+    {
+      "name": "webhook-action-api-sink",
+      "config": {
+        "connector.class": "io.confluent.connect.http.HttpSinkConnector",
+        "topics": "fraud-scores",
+        "http.api.url": "https://api.payment-gateway.com/v1/transactions/block",
+        "request.method": "POST",
+        "headers": "Content-Type:application/json|Authorization:Bearer ${file:/secrets/api-credentials.properties:payment.gateway.token}",
+        "batch.max.size": 10,
+        "batch.prefix": "[",
+        "batch.suffix": "]",
+        "batch.separator": ",",
+        "max.retries": 5,
+        "retry.backoff.ms": 2000,
+        "request.body.format": "json",
+        "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+        "value.converter.schemas.enable": false,
+        "transforms": "filter,extractFields",
+        "transforms.filter.type": "org.apache.kafka.connect.transforms.Filter",
+        "transforms.filter.predicate": "shouldBlock",
+        "predicates": "shouldBlock",
+        "predicates.shouldBlock.type": "org.apache.kafka.connect.transforms.predicates.TopicNameMatches",
+        "predicates.shouldBlock.pattern": ".*",
+        "transforms.extractFields.type": "org.apache.kafka.connect.transforms.ExtractField$Value",
+        "transforms.extractFields.field": "transaction_id",
+        "tasks.max": 2
+      }
+    },
+    {
+      "name": "redis-cache-sink",
+      "config": {
+        "connector.class": "com.github.jcustenborder.kafka.connect.redis.RedisSinkConnector",
+        "redis.hosts": "redis:6379",
+        "redis.password": "${file:/secrets/redis-credentials.properties:password}",
+        "redis.database": 0,
+        "topics": "fraud-scores,user-profiles",
+        "redis.operation": "SET",
+        "redis.key.prefix": "fraud:",
+        "redis.ttl.seconds": 86400,
+        "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+        "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+        "value.converter.schemas.enable": false,
+        "tasks.max": 2
+      }
+    }
+  ],
+  "deployment_notes": {
+    "prerequisites": [
+      "All sink systems must be accessible from Kafka Connect workers",
+      "Appropriate credentials configured in secrets management",
+      "Target databases/indices/collections created with proper schemas",
+      "Network connectivity and firewall rules configured",
+      "SSL/TLS certificates installed if required"
+    ],
+    "security_considerations": [
+      "Use externalized secrets for all credentials",
+      "Enable SSL/TLS for all connections",
+      "Implement least-privilege access for sink accounts",
+      "Enable audit logging on sink systems",
+      "Rotate credentials regularly",
+      "Use VPC peering or private links where possible",
+      "Implement rate limiting on HTTP sinks"
+    ],
+    "monitoring": [
+      "Track connector status and lag",
+      "Monitor sink system load and performance",
+      "Alert on connector failures or high error rates",
+      "Track data freshness in sink systems",
+      "Monitor network latency to sinks",
+      "Track batch sizes and throughput"
+    ],
+    "data_quality": [
+      "Implement schema validation before sinking",
+      "Use dead letter queues for failed records",
+      "Monitor data completeness in sinks",
+      "Implement data reconciliation checks",
+      "Track duplicate records",
+      "Monitor schema evolution compatibility"
+    ],
+    "performance_tuning": {
+      "batch_size": "Increase for higher throughput, decrease for lower latency",
+      "tasks_max": "Scale based on sink system capacity and parallelism needs",
+      "flush_timeout": "Balance between latency and efficiency",
+      "buffer_size": "Tune based on message size and memory availability",
+      "compression": "Enable for network-bound scenarios"
+    },
+    "disaster_recovery": [
+      "Configure consumer group offsets backup",
+      "Implement sink system backup strategies",
+      "Test connector restart and recovery procedures",
+      "Document rollback procedures",
+      "Maintain connector configuration version control"
+    ]
+  },
+  "integration_patterns": {
+    "real_time_alerting": {
+      "connectors": ["slack-critical-alerts-sink", "pagerduty-incident-sink"],
+      "latency": "<1 second",
+      "use_case": "Immediate notification of critical fraud events"
+    },
+    "analytics_warehouse": {
+      "connectors": ["snowflake-data-warehouse-sink", "s3-data-lake-sink"],
+      "latency": "1-5 minutes",
+      "use_case": "Historical analysis and ML model training"
+    },
+    "operational_systems": {
+      "connectors": ["postgresql-case-management-sink", "salesforce-crm-update-sink"],
+      "latency": "<10 seconds",
+      "use_case": "Fraud investigation and case management"
+    },
+    "search_and_discovery": {
+      "connectors": ["elasticsearch-fraud-alerts-sink"],
+      "latency": "<5 seconds",
+      "use_case": "Real-time search and ad-hoc analysis"
+    },
+    "automated_actions": {
+      "connectors": ["webhook-action-api-sink", "redis-cache-sink"],
+      "latency": "<1 second",
+      "use_case": "Automatic transaction blocking and caching"
+    }
+  }
+}

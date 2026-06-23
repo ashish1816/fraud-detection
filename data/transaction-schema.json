@@ -1,0 +1,3 @@
+{
+  "schema": "{\"type\":\"record\",\"name\":\"Transaction\",\"namespace\":\"com.frauddetection\",\"fields\":[{\"name\":\"transaction_id\",\"type\":\"long\"},{\"name\":\"user_id\",\"type\":\"long\"},{\"name\":\"amount\",\"type\":\"double\"},{\"name\":\"merchant_id\",\"type\":\"long\"},{\"name\":\"currency\",\"type\":\"string\"},{\"name\":\"payment_method\",\"type\":\"string\"},{\"name\":\"ip_address\",\"type\":\"string\"},{\"name\":\"device_id\",\"type\":\"string\"},{\"name\":\"latitude\",\"type\":\"double\"},{\"name\":\"longitude\",\"type\":\"double\"},{\"name\":\"created_at\",\"type\":\"long\"}]}"
+}
