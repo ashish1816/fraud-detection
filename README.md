@@ -1,6 +1,7 @@
 # Real-Time Fraud Detection with Apache Flink & Confluent Cloud
 
 A production-ready fraud detection system built with **Apache Flink SQL**, **Confluent Cloud**, and **Schema Registry** for real-time stream processing.
+This project is made with the help of IBM BOB.
 
 ## 🏆 Hackathon Project
 
