@@ -1,6 +1,7 @@
-# Ignore all markdown files except README.md
+# Ignore all markdown files except README.md and SCHEMA_EXPLANATION.md
 *.md
 !README.md
+!SCHEMA_EXPLANATION.md
 
 # Keep scripts directory
 !scripts/
