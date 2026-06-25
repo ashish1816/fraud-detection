@@ -1,19 +1,18 @@
 #!/usr/bin/env python3
 """
-Real-time Fraud Detection Consumer
-Consumes orders and detects fraud patterns in real-time
+Simple Real-time Fraud Detection Consumer
+Consumes orders from Datagen connector and detects fraud patterns
 Run from: confluent-fraud-detection directory
-Usage: python3 scripts/fraud-detector.py
+Usage: python3 scripts/fraud-detector-simple.py
 """
 
 import json
 import sys
 from collections import defaultdict
-from datetime import datetime, timedelta
-from confluent_kafka import Consumer
-from confluent_kafka.serialization import SerializationContext, MessageField
+from datetime import datetime
 from confluent_kafka.schema_registry import SchemaRegistryClient
 from confluent_kafka.schema_registry.json_schema import JSONDeserializer
+from confluent_kafka.serialization import SerializationContext, MessageField
 
 # Fraud detection thresholds (adapted for orders)
 HIGH_AMOUNT_THRESHOLD = 500  # High order value
@@ -90,7 +89,13 @@ def print_fraud_alert(order, score, reasons, decision, emoji):
     print(f"Order ID: {order.get('orderid', 'N/A')}")
     print(f"Item: {order.get('itemid', 'N/A')}")
     print(f"Amount: ${order.get('orderunits', 0):.2f}")
-    print(f"Address: {order.get('address', {}).get('city', 'N/A')}, {order.get('address', {}).get('state', 'N/A')}")
+    
+    address = order.get('address', {})
+    if isinstance(address, dict):
+        city = address.get('city', 'N/A')
+        state = address.get('state', 'N/A')
+        print(f"Address: {city}, {state}")
+    
     print(f"Order Time: {order.get('ordertime', 'N/A')}")
     print(f"\nFraud Score: {score}/100")
     print(f"Decision: {decision}")
@@ -110,6 +115,14 @@ def main():
     # Load configuration
     config = load_config()
     
+    # Import Kafka consumer
+    try:
+        from confluent_kafka import Consumer
+    except ImportError:
+        print("❌ Error: confluent-kafka package not installed")
+        print("Install with: pip3 install confluent-kafka")
+        sys.exit(1)
+    
     # Configure consumer
     consumer_conf = {
         'bootstrap.servers': config['BOOTSTRAP_SERVER'],
@@ -117,34 +130,44 @@ def main():
         'sasl.mechanisms': 'PLAIN',
         'sasl.username': config['KAFKA_API_KEY'],
         'sasl.password': config['KAFKA_API_SECRET'],
-        'group.id': 'fraud-detection-consumer',
+        'group.id': 'fraud-detection-simple',
         'auto.offset.reset': 'earliest'
     }
     
-    # Configure Schema Registry
+    # Configure Schema Registry for Avro deserialization
     schema_registry_conf = {
         'url': config['SR_ENDPOINT'],
         'basic.auth.user.info': f"{config['SR_API_KEY']}:{config['SR_API_SECRET']}"
     }
     
+    consumer = None
+    order_count = 0
+    fraud_detected = 0
+    review_flagged = 0
+    approved = 0
+    
     try:
+        # Initialize Schema Registry client
         schema_registry_client = SchemaRegistryClient(schema_registry_conf)
         
-        # Get schema for deserialization (Orders schema)
+        # Get the latest schema for the topic
         schema_str = schema_registry_client.get_latest_version('postgres-transactions-value').schema.schema_str
-        json_deserializer = JSONDeserializer(schema_str)
+        
+        # Define a simple from_dict function that returns the dict as-is
+        def dict_to_order(obj, ctx):
+            return obj
+        
+        # Initialize JSON Schema deserializer with the schema and from_dict function
+        json_deserializer = JSONDeserializer(schema_str, from_dict=dict_to_order)
         
         consumer = Consumer(consumer_conf)
         consumer.subscribe(['postgres-transactions'])
         
         print("✅ Connected to Kafka")
+        print("✅ Connected to Schema Registry")
         print("✅ Subscribed to postgres-transactions topic")
+        print("✅ Using JSON Schema deserialization")
         print()
-        
-        order_count = 0
-        fraud_detected = 0
-        review_flagged = 0
-        approved = 0
         
         while True:
             msg = consumer.poll(1.0)
@@ -156,20 +179,27 @@ def main():
                 print(f"❌ Consumer error: {msg.error()}")
                 continue
             
-            # Deserialize order
-            order = json_deserializer(
-                msg.value(),
-                SerializationContext('postgres-transactions', MessageField.VALUE)
-            )
+            # Deserialize order using JSON Schema
+            try:
+                order = json_deserializer(
+                    msg.value(),
+                    SerializationContext('postgres-transactions', MessageField.VALUE)
+                )
+            except Exception as e:
+                print(f"⚠️ Failed to deserialize message: {e}")
+                continue
             
             order_count += 1
             
-            # Use orderid as user identifier for tracking
+            # Use orderid as identifier
             order_id = order.get('orderid', 'unknown')
             
             # Extract address info for user tracking
             address = order.get('address', {})
-            user_key = f"{address.get('city', 'unknown')}_{address.get('zipcode', 'unknown')}"
+            if isinstance(address, dict):
+                user_key = f"{address.get('city', 'unknown')}_{address.get('zipcode', 'unknown')}"
+            else:
+                user_key = 'unknown'
             
             # Get user history
             user_history = user_orders[user_key]
@@ -225,7 +255,8 @@ def main():
         traceback.print_exc()
     
     finally:
-        consumer.close()
+        if consumer:
+            consumer.close()
 
 if __name__ == '__main__':
     main()

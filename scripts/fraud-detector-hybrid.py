@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """
-Real-time Fraud Detection Consumer
-Consumes orders and detects fraud patterns in real-time
+Hybrid Real-time Fraud Detection System
+Consumes orders, detects fraud, and produces alerts to fraud-alerts topic
 Run from: confluent-fraud-detection directory
-Usage: python3 scripts/fraud-detector.py
+Usage: python3 scripts/fraud-detector-hybrid.py
 """
 
 import json
 import sys
 from collections import defaultdict
-from datetime import datetime, timedelta
-from confluent_kafka import Consumer
-from confluent_kafka.serialization import SerializationContext, MessageField
+from datetime import datetime
+from confluent_kafka import Consumer, Producer
 from confluent_kafka.schema_registry import SchemaRegistryClient
-from confluent_kafka.schema_registry.json_schema import JSONDeserializer
+from confluent_kafka.schema_registry.json_schema import JSONDeserializer, JSONSerializer
+from confluent_kafka.serialization import SerializationContext, MessageField
 
 # Fraud detection thresholds (adapted for orders)
 HIGH_AMOUNT_THRESHOLD = 500  # High order value
@@ -82,6 +82,29 @@ def get_decision(score):
     else:
         return "APPROVE", "✅"
 
+def create_fraud_alert(order, score, reasons, decision):
+    """Create a fraud alert object to send to fraud-alerts topic"""
+    address = order.get('address', {})
+    
+    alert = {
+        "alert_id": f"alert_{order.get('orderid', 'unknown')}_{int(datetime.now().timestamp())}",
+        "timestamp": datetime.now().isoformat(),
+        "order_id": order.get('orderid'),
+        "item_id": order.get('itemid'),
+        "amount": order.get('orderunits', 0),
+        "order_time": order.get('ordertime'),
+        "location": {
+            "city": address.get('city', 'N/A') if isinstance(address, dict) else 'N/A',
+            "state": address.get('state', 'N/A') if isinstance(address, dict) else 'N/A',
+            "zipcode": address.get('zipcode', 0) if isinstance(address, dict) else 0
+        },
+        "fraud_score": score,
+        "decision": decision,
+        "reasons": reasons
+    }
+    
+    return alert
+
 def print_fraud_alert(order, score, reasons, decision, emoji):
     """Print formatted fraud alert"""
     print("\n" + "="*70)
@@ -90,7 +113,13 @@ def print_fraud_alert(order, score, reasons, decision, emoji):
     print(f"Order ID: {order.get('orderid', 'N/A')}")
     print(f"Item: {order.get('itemid', 'N/A')}")
     print(f"Amount: ${order.get('orderunits', 0):.2f}")
-    print(f"Address: {order.get('address', {}).get('city', 'N/A')}, {order.get('address', {}).get('state', 'N/A')}")
+    
+    address = order.get('address', {})
+    if isinstance(address, dict):
+        city = address.get('city', 'N/A')
+        state = address.get('state', 'N/A')
+        print(f"Address: {city}, {state}")
+    
     print(f"Order Time: {order.get('ordertime', 'N/A')}")
     print(f"\nFraud Score: {score}/100")
     print(f"Decision: {decision}")
@@ -99,16 +128,31 @@ def print_fraud_alert(order, score, reasons, decision, emoji):
         print(f"  • {reason}")
     print("="*70)
 
+def delivery_report(err, msg):
+    """Callback for producer delivery reports"""
+    if err is not None:
+        print(f'❌ Alert delivery failed: {err}')
+    else:
+        print(f'✉️  Alert delivered to {msg.topic()} [{msg.partition()}]')
+
 def main():
-    print("🔍 Real-time Fraud Detection System (Orders)")
+    print("🔍 Hybrid Real-time Fraud Detection System")
     print("="*70)
-    print("Monitoring orders for fraud patterns...")
+    print("Monitoring orders and producing fraud alerts...")
     print("Press Ctrl+C to stop")
     print("="*70)
     print()
     
     # Load configuration
     config = load_config()
+    
+    # Import Kafka consumer
+    try:
+        from confluent_kafka import Consumer, Producer
+    except ImportError:
+        print("❌ Error: confluent-kafka package not installed")
+        print("Install with: pip3 install confluent-kafka")
+        sys.exit(1)
     
     # Configure consumer
     consumer_conf = {
@@ -117,8 +161,17 @@ def main():
         'sasl.mechanisms': 'PLAIN',
         'sasl.username': config['KAFKA_API_KEY'],
         'sasl.password': config['KAFKA_API_SECRET'],
-        'group.id': 'fraud-detection-consumer',
+        'group.id': 'fraud-detection-hybrid',
         'auto.offset.reset': 'earliest'
+    }
+    
+    # Configure producer for fraud alerts
+    producer_conf = {
+        'bootstrap.servers': config['BOOTSTRAP_SERVER'],
+        'security.protocol': 'SASL_SSL',
+        'sasl.mechanisms': 'PLAIN',
+        'sasl.username': config['KAFKA_API_KEY'],
+        'sasl.password': config['KAFKA_API_SECRET'],
     }
     
     # Configure Schema Registry
@@ -127,24 +180,40 @@ def main():
         'basic.auth.user.info': f"{config['SR_API_KEY']}:{config['SR_API_SECRET']}"
     }
     
+    consumer = None
+    producer = None
+    order_count = 0
+    fraud_detected = 0
+    review_flagged = 0
+    approved = 0
+    alerts_sent = 0
+    
     try:
+        # Initialize Schema Registry client
         schema_registry_client = SchemaRegistryClient(schema_registry_conf)
         
-        # Get schema for deserialization (Orders schema)
+        # Get the latest schema for the topic
         schema_str = schema_registry_client.get_latest_version('postgres-transactions-value').schema.schema_str
-        json_deserializer = JSONDeserializer(schema_str)
+        
+        # Define a simple from_dict function that returns the dict as-is
+        def dict_to_order(obj, ctx):
+            return obj
+        
+        # Initialize JSON Schema deserializer with the schema and from_dict function
+        json_deserializer = JSONDeserializer(schema_str, from_dict=dict_to_order)
+        
+        # Initialize producer
+        producer = Producer(producer_conf)
         
         consumer = Consumer(consumer_conf)
         consumer.subscribe(['postgres-transactions'])
         
         print("✅ Connected to Kafka")
+        print("✅ Connected to Schema Registry")
         print("✅ Subscribed to postgres-transactions topic")
+        print("✅ Producer ready for fraud-alerts topic")
+        print("✅ Using JSON Schema deserialization")
         print()
-        
-        order_count = 0
-        fraud_detected = 0
-        review_flagged = 0
-        approved = 0
         
         while True:
             msg = consumer.poll(1.0)
@@ -156,20 +225,27 @@ def main():
                 print(f"❌ Consumer error: {msg.error()}")
                 continue
             
-            # Deserialize order
-            order = json_deserializer(
-                msg.value(),
-                SerializationContext('postgres-transactions', MessageField.VALUE)
-            )
+            # Deserialize order using JSON Schema
+            try:
+                order = json_deserializer(
+                    msg.value(),
+                    SerializationContext('postgres-transactions', MessageField.VALUE)
+                )
+            except Exception as e:
+                print(f"⚠️ Failed to deserialize message: {e}")
+                continue
             
             order_count += 1
             
-            # Use orderid as user identifier for tracking
+            # Use orderid as identifier
             order_id = order.get('orderid', 'unknown')
             
             # Extract address info for user tracking
             address = order.get('address', {})
-            user_key = f"{address.get('city', 'unknown')}_{address.get('zipcode', 'unknown')}"
+            if isinstance(address, dict):
+                user_key = f"{address.get('city', 'unknown')}_{address.get('zipcode', 'unknown')}"
+            else:
+                user_key = 'unknown'
             
             # Get user history
             user_history = user_orders[user_key]
@@ -189,6 +265,21 @@ def main():
             # Print alert for suspicious orders
             if decision in ["BLOCK", "REVIEW"]:
                 print_fraud_alert(order, score, reasons, decision, emoji)
+                
+                # Create and send fraud alert to fraud-alerts topic
+                alert = create_fraud_alert(order, score, reasons, decision)
+                
+                try:
+                    # Produce alert as JSON
+                    producer.produce(
+                        topic='fraud-alerts',
+                        value=json.dumps(alert).encode('utf-8'),
+                        callback=delivery_report
+                    )
+                    producer.poll(0)  # Trigger delivery reports
+                    alerts_sent += 1
+                except Exception as e:
+                    print(f"❌ Failed to produce alert: {e}")
             else:
                 # Just show approved orders briefly
                 print(f"✅ Order {order_id} - {order.get('itemid', 'N/A')} - ${order.get('orderunits', 0):.2f} - APPROVED (Score: {score})")
@@ -207,16 +298,19 @@ def main():
             
             # Print statistics every 10 orders
             if order_count % 10 == 0:
-                print(f"\n📊 Statistics: Total={order_count} | Blocked={fraud_detected} | Review={review_flagged} | Approved={approved}\n")
+                print(f"\n📊 Statistics: Total={order_count} | Blocked={fraud_detected} | Review={review_flagged} | Approved={approved} | Alerts Sent={alerts_sent}\n")
     
     except KeyboardInterrupt:
         print("\n\n🛑 Stopping fraud detection system...")
+        if producer:
+            producer.flush()  # Ensure all messages are sent
         print(f"\n📊 Final Statistics:")
         print(f"   Total Orders: {order_count}")
         if order_count > 0:
             print(f"   Blocked: {fraud_detected} ({fraud_detected/order_count*100:.1f}%)")
             print(f"   Flagged for Review: {review_flagged} ({review_flagged/order_count*100:.1f}%)")
             print(f"   Approved: {approved} ({approved/order_count*100:.1f}%)")
+            print(f"   Alerts Sent: {alerts_sent}")
         print("\n✅ Fraud detection system stopped")
     
     except Exception as e:
@@ -225,7 +319,10 @@ def main():
         traceback.print_exc()
     
     finally:
-        consumer.close()
+        if consumer:
+            consumer.close()
+        if producer:
+            producer.flush()
 
 if __name__ == '__main__':
     main()
